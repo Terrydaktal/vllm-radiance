@@ -200,6 +200,16 @@ services:
       TRITON_CACHE_DIR: /cache/triton
       AITER_ROOT_DIR: /cache/aiter
       TRITON_CACHE_AUTOTUNING: "1"
+      # Optional persisted PyTorch TunableOp workflow. Keep off for generic
+      # serving. `collect` records encountered GEMMs without live tuning;
+      # after offline tuning, `serve` consumes only a verified result set.
+      RADIANCE_TUNABLEOP_MODE: "${RADIANCE_TUNABLEOP_MODE:-off}"
+      RADIANCE_TUNABLEOP_CACHE_DIR: "${RADIANCE_TUNABLEOP_CACHE_DIR:-/cache/tunableop}"
+      RADIANCE_TUNABLEOP_NAMESPACE: "${RADIANCE_TUNABLEOP_NAMESPACE:-}"
+      # Optional calibrated q/k/v/prob scale sidecar. The checkpoint and the
+      # sidecar are both read-only; model/checksum verification is mandatory.
+      RADIANCE_FP8_KV_SCALES: "${RADIANCE_FP8_KV_SCALES:-}"
+      RADIANCE_FP8_KV_SCALES_VERIFY: "${RADIANCE_FP8_KV_SCALES_VERIFY:-1}"
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri

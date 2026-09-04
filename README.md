@@ -19,6 +19,13 @@ pins, native v0.28 DFlash2 plus focused post-release correctness backports, nati
 support, reproducible benchmarks, and deployment qualification. Published images are at
 [`magiccodingman/vllm-radiance`](https://hub.docker.com/r/magiccodingman/vllm-radiance).
 
+Two additional opt-in laboratories preserve the qualified default: immutable,
+checkpoint-bound FP8 attention/KV calibration sidecars for fidelity work, and
+an offline collect → tune → verified-serve PyTorch TunableOp workflow for
+residual BLAS GEMMs. Neither is enabled until its exact model/profile passes
+the normal correctness and benchmark gates. See
+[FP8-KV calibration and persisted TunableOp](docs/FP8_KV_TUNABLEOP.md).
+
 ## Quick start
 
 The portable Compose file contains no machine-local paths. Copy the environment template and point it at

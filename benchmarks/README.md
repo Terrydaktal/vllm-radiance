@@ -12,6 +12,24 @@ rather than searching for maximum throughput.
 - Every script verifies the required mounts before starting a container or run.
 - A run directory is never reused or overwritten.
 
+### FP8-KV calibration and TunableOp preflight
+
+The calibration/tuning continuation adds two CPU-only integrity checks which
+must pass before the corresponding GPU maintenance run:
+
+```bash
+python benchmarks/bin/check_fp8_kv_calibration.py
+python benchmarks/bin/check_tunableop.py
+```
+
+The benchmark manifest captures the FP8-KV sidecar path/verification mode and
+all Radiance/PyTorch TunableOp mode, namespace, and filename variables. The lab
+requires `FP8_KV_SCALES_HOST` and/or `TUNABLEOP_ROOT_HOST` whenever the
+corresponding feature is active, so it hashes artifacts instead of recording
+only container paths. The complete immutable artifact contract, collect →
+offline tune → verified serve sequence, expected impact, and qualification matrix are in
+[`docs/FP8_KV_TUNABLEOP.md`](../docs/FP8_KV_TUNABLEOP.md).
+
 ### ROCm host-registration probe
 
 `bin/probe_rocm_host_registration.py` isolates mmap registration from model

@@ -200,6 +200,18 @@ def section_opts():
     ]:
         print(f"        {dim('·')} {name} = {c(ACCENT, _val(name, dflt))}  " + dim(desc))
 
+    print("\n  " + dim("calibration / persisted tuning (opt-in):"))
+    fp8_sidecar = os.environ.get("RADIANCE_FP8_KV_SCALES", "")
+    tunable = os.environ.get("RADIANCE_TUNABLEOP_ACTIVE", "off")
+    print(
+        f"        {dim('·')} FP8-KV scales = "
+        + (ok(fp8_sidecar) if fp8_sidecar else dim("checkpoint/default"))
+    )
+    print(
+        f"        {dim('·')} TunableOp = "
+        + (ok(tunable) if tunable != "off" else dim("off"))
+    )
+
     print("\n  " + dim("baked-in (always on; correctness + GEMM path):"))
     baked = [
         "block-FP8 GEMM dispatcher; preshuffle / AITER split-K / generic + tuned fp8-configs",
