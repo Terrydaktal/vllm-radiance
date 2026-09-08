@@ -110,6 +110,7 @@ services:
       RADIANCE_GDN_META: "${RADIANCE_GDN_META:-1}"
       RADIANCE_GDN_MERGE_INPROJ: "${RADIANCE_GDN_MERGE_INPROJ:-1}"
       RADIANCE_GDN_FUSED_UPDATE: "${RADIANCE_GDN_FUSED_UPDATE:-1}"
+      RADIANCE_GDN_FUSED_MAX_ITEMS: "${RADIANCE_GDN_FUSED_MAX_ITEMS:-32}"
       # Build identical speculative GDN metadata once per step, then copy only
       # each KV group's block-table-derived state indices.
       RADIANCE_GDN_SHARED_BUILD: "${RADIANCE_GDN_SHARED_BUILD:-1}"
@@ -130,6 +131,12 @@ services:
       RADIANCE_MXFP4_TN4_MIN_M: "${RADIANCE_MXFP4_TN4_MIN_M:-2048}"
       RADIANCE_MXFP4_EPIFAST: "${RADIANCE_MXFP4_EPIFAST:-1}"
       RADIANCE_MXFP4_WPERM: "${RADIANCE_MXFP4_WPERM:-0}"
+      # RX5 candidates. WPERM+DECODE_NT accelerates decode; A_TILED removes
+      # its former prefill penalty but requires the complete FP8-stream tier.
+      # GDN_NORM_QUANT is independently selectable and graph-cache isolated.
+      RADIANCE_MXFP4_DECODE_NT: "${RADIANCE_MXFP4_DECODE_NT:-0}"
+      RADIANCE_MXFP4_A_TILED_MIN_M: "${RADIANCE_MXFP4_A_TILED_MIN_M:-0}"
+      RADIANCE_GDN_NORM_QUANT: "${RADIANCE_GDN_NORM_QUANT:-0}"
       # Experimental RX4 traced-quant / FP8 residual-stream tier. These remain
       # off because they failed strict output/tool qualification on the Quark
       # MXFP4 W4A8 TP2 path.
@@ -200,6 +207,16 @@ services:
       TRITON_CACHE_DIR: /cache/triton
       AITER_ROOT_DIR: /cache/aiter
       TRITON_CACHE_AUTOTUNING: "1"
+      # Optional persisted PyTorch TunableOp workflow. Keep off for generic
+      # serving. `collect` records encountered GEMMs without live tuning;
+      # after offline tuning, `serve` consumes only a verified result set.
+      RADIANCE_TUNABLEOP_MODE: "${RADIANCE_TUNABLEOP_MODE:-off}"
+      RADIANCE_TUNABLEOP_CACHE_DIR: "${RADIANCE_TUNABLEOP_CACHE_DIR:-/cache/tunableop}"
+      RADIANCE_TUNABLEOP_NAMESPACE: "${RADIANCE_TUNABLEOP_NAMESPACE:-}"
+      # Optional calibrated q/k/v/prob scale sidecar. The checkpoint and the
+      # sidecar are both read-only; model/checksum verification is mandatory.
+      RADIANCE_FP8_KV_SCALES: "${RADIANCE_FP8_KV_SCALES:-}"
+      RADIANCE_FP8_KV_SCALES_VERIFY: "${RADIANCE_FP8_KV_SCALES_VERIFY:-1}"
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri

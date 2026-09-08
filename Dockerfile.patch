@@ -13,9 +13,10 @@ ARG R4D_VERSION=v0.5.0
 ARG R4D_COMMIT=e8de4bc1f3dbd608dcb8d3ffceb6b48acdf83bb7
 ENV RADIANCE_VERSION=${RADIANCE_VERSION} \
     SP=/opt/vllm/lib/python3.12/site-packages \
-    RADIANCE_GDN_MERGE_INPROJ=1 RADIANCE_GDN_FUSED_UPDATE=1 RADIANCE_GDN_SHARED_BUILD=1 \
+    RADIANCE_GDN_MERGE_INPROJ=1 RADIANCE_GDN_FUSED_UPDATE=1 RADIANCE_GDN_FUSED_MAX_ITEMS=32 RADIANCE_GDN_SHARED_BUILD=1 \
     RADIANCE_TOPK_COMPOSITE=1 RADIANCE_TOPK_COMPOSITE_KCAP=64 \
-    RADIANCE_MXFP4_EPIFAST=1 RADIANCE_MXFP4_WPERM=0 RADIANCE_NORMQUANT_FUSION=0 \
+    RADIANCE_MXFP4_EPIFAST=1 RADIANCE_MXFP4_WPERM=0 RADIANCE_MXFP4_DECODE_NT=0 \
+    RADIANCE_MXFP4_A_TILED_MIN_M=0 RADIANCE_GDN_NORM_QUANT=0 RADIANCE_NORMQUANT_FUSION=0 \
     RADIANCE_MXFP4_HOIST_QUANT=0 RADIANCE_MXFP4_TRACED_QUANT=0 RADIANCE_FP8_STREAM=0 \
     RADIANCE_KV_GROUP_OPT=1 RADIANCE_AR_QNT=1024 RADIANCE_AR_QNB=96 \
     RADIANCE_DYNAMIC_WIDTH=1 RADIANCE_DYNW_MIN_BATCH=5 \
@@ -25,7 +26,8 @@ COPY radiance_amdsmi.py radiance_amdsmi.pth \
      radiance_kernels.py radiance_vit_attn.py radiance_allreduce.py \
      radiance_draft.py radiance_draft_gpu.py radiance_drafthead.py radiance_gemm.py radiance_w4.py \
      radiance_r4d_attn.py radiance_gdn.py radiance_gdnmerge.py radiance_mxfp4.py \
-     radiance_arnq.py radiance_topk.py radiance_verifyhead.py radiance_kv_offload.py ${SP}/
+     radiance_arnq.py radiance_topk.py radiance_verifyhead.py radiance_kv_offload.py \
+     radiance_kv_calibration.py radiance_tunableop.py ${SP}/
 COPY fp8-configs/ ${SP}/vllm/model_executor/layers/quantization/utils/configs/
 COPY moe-configs/ ${SP}/vllm/model_executor/layers/fused_moe/configs/
 COPY mxfp4-configs/ ${SP}/aiter/ops/triton/configs/gemm/
@@ -42,6 +44,7 @@ RUN set -eu; cd /opt/patches; \
              patch_quark_mxfp4 patch_quark_bf16_mtp patch_ar_maxbytes patch_ar_geometry \
              patch_kv_group_size patch_gdn_merge_inproj patch_dynwidth patch_verify_head \
              patch_kv_offload_registration patch_kv_offload_lifecycle patch_kv_offload_restore \
+             patch_fp8_kv_sidecar \
              patch_xgrammar_spec_termination \
              patch_xgrammar_spec_reasoning patch_parser_shared_engine \
              patch_qwen_open_object_schema; do \
@@ -74,7 +77,7 @@ COPY radiance_mxfp4_fp8.hip /opt/patches/
 RUN INC=$(python -m pybind11 --includes); \
     hipcc -O3 -std=c++17 -fPIC -shared --offload-arch=gfx1201 -Wno-unused-result \
       $INC /opt/patches/radiance_mxfp4_fp8.hip -o ${SP}/radiance_mxfp4_fp8.so \
- && python -c "import torch, radiance_mxfp4_fp8 as m; assert all(hasattr(m, n) for n in ('launch', 'set_decode_scratch', 'launch_add_rms_quant', 'launch_silu_mul_quant')); import radiance_mxfp4; assert hasattr(torch.ops.radiance, 'mxfp4_linear_pq'); print('radiance MXFP4 W4A8 RX4 extension and pre-quantized op OK')"
+ && python -c "import torch, radiance_mxfp4_fp8 as m; assert all(hasattr(m, n) for n in ('launch', 'launch_at', 'set_decode_scratch', 'launch_add_rms_quant', 'launch_silu_mul_quant', 'launch_gdn_norm_quant')); import radiance_mxfp4; assert hasattr(torch.ops.radiance, 'mxfp4_linear_pq'); print('radiance MXFP4 W4A8 RX5 extension and pre-quantized op OK')"
 
 COPY VERSION /opt/radiance_version
 COPY radiance_preamble.py /opt/radiance_preamble.py

@@ -242,7 +242,8 @@ COPY radiance_amdsmi.py radiance_amdsmi.pth \
      radiance_kernels.py radiance_vit_attn.py radiance_allreduce.py \
      radiance_draft.py radiance_draft_gpu.py radiance_drafthead.py radiance_gemm.py radiance_w4.py \
      radiance_r4d_attn.py radiance_gdn.py radiance_gdnmerge.py radiance_mxfp4.py \
-     radiance_arnq.py radiance_topk.py radiance_verifyhead.py radiance_kv_offload.py ${SP}/
+     radiance_arnq.py radiance_topk.py radiance_verifyhead.py radiance_kv_offload.py \
+     radiance_kv_calibration.py radiance_tunableop.py ${SP}/
 COPY fp8-configs/ ${SP}/vllm/model_executor/layers/quantization/utils/configs/
 COPY moe-configs/ ${SP}/vllm/model_executor/layers/fused_moe/configs/
 # AITER has no gfx1201 MXFP4 table. Its gfx1250 table selects an unsupported
@@ -265,6 +266,7 @@ RUN set -eu; cd /opt/patches; \
              patch_quark_mxfp4 patch_quark_bf16_mtp patch_ar_maxbytes patch_ar_geometry \
              patch_kv_group_size patch_gdn_merge_inproj patch_dynwidth patch_verify_head \
              patch_kv_offload_registration patch_kv_offload_lifecycle patch_kv_offload_restore \
+             patch_fp8_kv_sidecar \
              patch_xgrammar_spec_termination \
              patch_xgrammar_spec_reasoning patch_parser_shared_engine \
              patch_qwen_open_object_schema; do \
@@ -295,7 +297,7 @@ COPY radiance_mxfp4_fp8.hip /opt/patches/
 RUN INC=$(python -m pybind11 --includes); \
     hipcc -O3 -std=c++17 -fPIC -shared --offload-arch=${GFX_ARCH} -Wno-unused-result \
       $INC /opt/patches/radiance_mxfp4_fp8.hip -o ${SP}/radiance_mxfp4_fp8.so \
- && python -c "import torch, radiance_mxfp4_fp8 as m; assert all(hasattr(m, n) for n in ('launch', 'set_decode_scratch', 'launch_add_rms_quant', 'launch_silu_mul_quant')); import radiance_mxfp4; assert hasattr(torch.ops.radiance, 'mxfp4_linear_pq'); print('radiance MXFP4 W4A8 RX4 extension and pre-quantized op OK')"
+ && python -c "import torch, radiance_mxfp4_fp8 as m; assert all(hasattr(m, n) for n in ('launch', 'launch_at', 'set_decode_scratch', 'launch_add_rms_quant', 'launch_silu_mul_quant', 'launch_gdn_norm_quant')); import radiance_mxfp4; assert hasattr(torch.ops.radiance, 'mxfp4_linear_pq'); print('radiance MXFP4 W4A8 RX5 extension and pre-quantized op OK')"
 
 # --- strip debug symbols from the installed extensions (worth ~1 GB) ---
 # These are release builds, but they still carry .debug_* sections that nothing reads at runtime.
@@ -353,12 +355,13 @@ ENV VIRTUAL_ENV=/opt/vllm \
 ENV RADIANCE_USE_R4D=1 RADIANCE_USE_R4D_GDN=1 RADIANCE_R4D_REPORT=1 \
     RADIANCE_USE_R4D_AR=1 RADIANCE_USE_R4D_AR_QUANT=1 \
     RADIANCE_SKINNY_GEMM=1 RADIANCE_GDN_META=1 RADIANCE_GDN_MERGE_INPROJ=1 \
-    RADIANCE_GDN_FUSED_UPDATE=1 RADIANCE_GDN_SHARED_BUILD=1 \
+    RADIANCE_GDN_FUSED_UPDATE=1 RADIANCE_GDN_FUSED_MAX_ITEMS=32 RADIANCE_GDN_SHARED_BUILD=1 \
     RADIANCE_TOPK_TRITON_MIN_ROWS=1 RADIANCE_TOPK_COMPOSITE=1 \
     RADIANCE_TOPK_COMPOSITE_KCAP=64 \
     RADIANCE_MXFP4=0 RADIANCE_MXFP4_W4A8=0 RADIANCE_MXFP4_W4A8_MIN_M=0 RADIANCE_QUARK_BF16_MTP=0 \
     RADIANCE_MXFP4_DECODE_MAX_M=64 RADIANCE_MXFP4_TN4_MIN_M=2048 \
-    RADIANCE_MXFP4_EPIFAST=1 RADIANCE_MXFP4_WPERM=0 RADIANCE_NORMQUANT_FUSION=0 \
+    RADIANCE_MXFP4_EPIFAST=1 RADIANCE_MXFP4_WPERM=0 RADIANCE_MXFP4_DECODE_NT=0 \
+    RADIANCE_MXFP4_A_TILED_MIN_M=0 RADIANCE_GDN_NORM_QUANT=0 RADIANCE_NORMQUANT_FUSION=0 \
     RADIANCE_MXFP4_HOIST_QUANT=0 RADIANCE_MXFP4_TRACED_QUANT=0 RADIANCE_FP8_STREAM=0 \
     RADIANCE_KV_GROUP_OPT=1 RADIANCE_AR_QNT=1024 RADIANCE_AR_QNB=96 \
     RADIANCE_PRESHUFFLE=1 RADIANCE_ATTN_TUNE=1 RADIANCE_FUSE_RMS_QUANT=1 \
@@ -380,7 +383,7 @@ ARG TORCHVISION_VERSION
 RUN WANT_VLLM=${VLLM_VERSION} WANT_AITER=${AITER_VERSION} WANT_TORCH=${TORCH_VERSION} \
     WANT_TRITON=${TRITON_VERSION} WANT_VISION=${TORCHVISION_VERSION} \
     python -c 'import os, torch, vllm._C, amdsmi, importlib.metadata as m; import r4d, radiance_mxfp4_fp8; \
-assert all(hasattr(radiance_mxfp4_fp8, n) for n in ("launch", "set_decode_scratch", "launch_add_rms_quant", "launch_silu_mul_quant")); assert hasattr(r4d, "ar_oneshot_2rank_exact_nq"); \
+assert all(hasattr(radiance_mxfp4_fp8, n) for n in ("launch", "launch_at", "set_decode_scratch", "launch_add_rms_quant", "launch_silu_mul_quant", "launch_gdn_norm_quant")); assert hasattr(r4d, "ar_oneshot_2rank_exact_nq"); \
 v, a, t, r, tv = m.version("vllm"), m.version("amd-aiter"), m.version("torch"), m.version("triton"), m.version("torchvision"); \
 assert v.startswith(os.environ["WANT_VLLM"]), "vllm wheel reports " + v + ", built tag is " + os.environ["WANT_VLLM"]; \
 assert a.startswith(os.environ["WANT_AITER"]), "aiter wheel reports " + a + ", built tag is " + os.environ["WANT_AITER"]; \

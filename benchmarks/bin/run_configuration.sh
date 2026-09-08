@@ -269,6 +269,29 @@ if [[ $SPEC == on && -n $SPECULATIVE_CONFIG_JSON ]]; then
   fi
 fi
 
+manifest_calibration_args=()
+if [[ -n ${RADIANCE_FP8_KV_SCALES:-} ]]; then
+  scale_host=${FP8_KV_SCALES_HOST:-}
+  if [[ -z $scale_host && $RADIANCE_FP8_KV_SCALES == /models/* ]]; then
+    scale_host="$(dirname "$MODEL_HOST")/${RADIANCE_FP8_KV_SCALES#/models/}"
+  fi
+  [[ -n $scale_host && -f $scale_host && -f ${scale_host%.safetensors}.manifest.json ]] || {
+    echo "Set FP8_KV_SCALES_HOST to the sidecar's host path for an exact manifest" >&2
+    exit 1
+  }
+  manifest_calibration_args=(--fp8-kv-scales-host "$scale_host")
+fi
+
+manifest_tunableop_args=()
+if [[ ${RADIANCE_TUNABLEOP_MODE:-off} != off ]]; then
+  tunable_host=${TUNABLEOP_ROOT_HOST:-}
+  [[ -n $tunable_host && -d $tunable_host ]] || {
+    echo "Set TUNABLEOP_ROOT_HOST to the active namespace directory for an exact manifest" >&2
+    exit 1
+  }
+  manifest_tunableop_args=(--tunableop-root-host "$tunable_host")
+fi
+
 HIP_VISIBLE_DEVICES=$gpu_devices RADIANCE_IMAGE="$IMAGE" "${SCRIPT_DIR}/capture_manifest.py" \
   --output "${CONFIG_DIR}/manifest.json" \
   --label "$LABEL" --tp "$TP" --spec "$SPEC" \
@@ -276,6 +299,8 @@ HIP_VISIBLE_DEVICES=$gpu_devices RADIANCE_IMAGE="$IMAGE" "${SCRIPT_DIR}/capture_
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --container "$container" --image "$IMAGE" --model-host "$MODEL_HOST" \
   "${manifest_draft_args[@]}" \
+  "${manifest_calibration_args[@]}" \
+  "${manifest_tunableop_args[@]}" \
   --suite "$SUITE" --kv-cache-dtype "$KV_CACHE_DTYPE" --max-model-len "$MAX_MODEL_LEN" \
   --weight-quantization "$WEIGHT_QUANTIZATION" \
   --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \

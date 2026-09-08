@@ -19,6 +19,13 @@ pins, native v0.28 DFlash2 plus focused post-release correctness backports, nati
 support, reproducible benchmarks, and deployment qualification. Published images are at
 [`magiccodingman/vllm-radiance`](https://hub.docker.com/r/magiccodingman/vllm-radiance).
 
+Two additional opt-in laboratories preserve the qualified default: immutable,
+checkpoint-bound FP8 attention/KV calibration sidecars for fidelity work, and
+an offline collect → tune → verified-serve PyTorch TunableOp workflow for
+residual BLAS GEMMs. Neither is enabled until its exact model/profile passes
+the normal correctness and benchmark gates. See
+[FP8-KV calibration and persisted TunableOp](docs/FP8_KV_TUNABLEOP.md).
+
 ## Quick start
 
 The portable Compose file contains no machine-local paths. Copy the environment template and point it at
@@ -87,6 +94,8 @@ RADIANCE_MXFP4_W4A8=1
 RADIANCE_MXFP4_W4A8_MIN_M=0
 RADIANCE_MXFP4_DECODE_MAX_M=64
 RADIANCE_MXFP4_TN4_MIN_M=2048
+RADIANCE_MXFP4_WPERM=1
+RADIANCE_MXFP4_DECODE_NT=1
 ```
 
 `auto` lets vLLM consume the checkpoint's Quark metadata. On gfx1201, W4A8 retains packed OCP group-32
@@ -94,6 +103,11 @@ MXFP4 weights and dynamically quantizes activations to FP8 E4M3 so the kernels u
 path. Keep `RADIANCE_MXFP4_W4A8_MIN_M=0`: the generic AITER W4A4 fallback is numerically incorrect for one
 of the qualified Qwen GDN projections. The decode-shaped kernel covers `M<=64`; larger batches use the
 prefill kernel.
+
+The final two switches are the qualified RX5-safe decode subset. They store
+weights in the kernel's fragment order and use non-temporal decode loads. The
+more aggressive RX5 A-tiled, norm-quant, and FP8-stream paths remain available
+only as disabled experiments; do not infer that `RX5` as a whole is qualified.
 
 The checkpoint's embedded MTP tensors are BF16. Add `RADIANCE_QUARK_BF16_MTP=1` only when selecting its MTP
 profile. Non-spec and DFlash do not need that override.
@@ -107,6 +121,9 @@ a mixed +2.1% weighted single-stream signal, regressed ITL 1%-low by 21%, did
 not improve c1/c2/c8 or prefill, and failed strict greedy/tool-call gates. Do
 not enable `RADIANCE_NORMQUANT_FUSION` or `RADIANCE_FP8_STREAM` in production;
 see the [RX4 continuation report](https://gitlab.sayou.io/lance-wright/vllm-radiance/-/blob/main/docs/MXFP4_RX4_CONTINUATION.md).
+The subsequent safe-kernel selection, FP8-KV calibration work, and complete
+RX5 negative results are recorded in the
+[RX5 continuation report](docs/MXFP4_RX5_FP8KV_CONTINUATION.md).
 
 ## Serving modes
 
@@ -223,38 +240,42 @@ reproducible maintenance probe are documented in
 ## Measured performance
 
 BetterBench v0.2.2 used its v1 corpus, ten measured passes per category, greedy decoding, cold nonce-prefixed
-prompts, and c1/c2/c4/c8 on two R9700s. The current stable/default RX4-dark lane keeps
-`RADIANCE_NORMQUANT_FUSION=0`, `RADIANCE_FP8_STREAM=0`, and `R4D_ATTN_FP8=0` while retaining the qualified
-RX3 execution path, MXFP4/W4A8 target, fast DFlash K7, TP2, FP8 KV, and PIECEWISE graphs:
+prompts, and c1/c2/c4/c8 on two R9700s. The current recommended MXFP4 kernel
+profile adds `RADIANCE_MXFP4_WPERM=1` and `RADIANCE_MXFP4_DECODE_NT=1` while
+keeping full RX5 (`A_TILED`, `GDN_NORM_QUANT`, `NORMQUANT_FUSION`, and
+`FP8_STREAM`) disabled. The measured serving lane used the matched DFlash K7
+drafter, TP2, FP8 KV, and PIECEWISE graphs:
 
 | Weighted single-stream | ITL 1%-low | TTFT p50 | c1 | c2 | c4 | c8 |
 |---:|---:|---:|---:|---:|---:|---:|
-| **174.0 TPS** | **133.0 TPS** | **66 ms** | **155.3** | **274.4** | **399.4** | **493.3** |
+| **183.1 TPS** | **137.6 TPS** | **64 ms** | **163.0** | **286.1** | **462.0** | **523.5** |
 
 Single-stream category medians:
 
 | Category | Decode TPS | ITL 1%-low TPS | TTFT p50 |
 |---|---:|---:|---:|
-| Chat | 115.9 | 92.7 | 66.3 ms |
-| Code | 173.6 | 104.6 | 64.2 ms |
-| File edit | 198.0 | 173.2 | 68.3 ms |
-| JSON | 222.1 | 209.8 | 65.5 ms |
-| Math | 224.2 | 181.7 | 64.0 ms |
-| Prose | 124.0 | 99.0 | 64.7 ms |
-| Reasoning | 146.7 | 97.5 | 64.7 ms |
-| Summarization | 204.5 | 173.3 | 69.9 ms |
+| Chat | 140.4 | 118.6 | 66.0 ms |
+| Code | 188.8 | 116.5 | 63.1 ms |
+| File edit | 218.8 | 152.6 | 67.5 ms |
+| JSON | 249.4 | 183.4 | 63.5 ms |
+| Math | 243.7 | 196.4 | 62.8 ms |
+| Prose | 117.9 | 108.2 | 63.1 ms |
+| Reasoning | 134.8 | 108.6 | 63.1 ms |
+| Summarization | 210.1 | 186.5 | 68.3 ms |
 
-Cold prefill measured **3,980.1 / 4,547.1 / 4,313.5 TPS** at the 2K/4K/7K target depths. Every concurrency
+Cold prefill measured **4,031.8 / 4,444.7 / 4,268.6 TPS** at the 2K/4K/7K target depths. Every concurrency
 arm completed 24/24 requests. These are the standard 8K/C8 laboratory results at 85% GPU allocation with
 prefix caching and CPU offload disabled; the 128K/C4 production profile above intentionally has a different
 capacity/latency contract. Exact category TTFT, ITL, prefill, run metadata, and immutable raw results are in
-the [current RX4-dark BetterBench report](https://gitlab.sayou.io/lance-wright/vllm-radiance/-/blob/main/benchmarks/results/20260831T1130Z_mxfp4-rx4/rx4-control-betterbench-standard/betterbench/report.md)
-and [RX4 qualification report](https://gitlab.sayou.io/lance-wright/vllm-radiance/-/blob/main/docs/MXFP4_RX4_CONTINUATION.md).
+the [current safe-subset BetterBench report](benchmarks/results/20260908T1905Z_safe-rx5-final/safe-wperm-nt-betterbench-standard/betterbench/report.md)
+and [RX5 continuation report](docs/MXFP4_RX5_FP8KV_CONTINUATION.md).
 
 DFlash remains experimental and opt-in because strict speculative/non-spec greedy equivalence has not passed,
 even though the stable-default lane passed its meaningful-output and sampled tool-call qualification. The
-newer RX4 traced-quant and FP8 residual-stream profile is not represented by the table above and remains off:
-its small weighted gain came with worse tail latency, mixed concurrency/prefill results, and correctness failures.
+full RX4/RX5 traced-quant, tiled-prefill, GDN norm-quant, and FP8
+residual-stream profile is not represented by the table above and remains off.
+The full RX5+DFlash interaction passed only 93/100 tool calls; constraining it
+to one tool call improved that to 98/100 but did not qualify it.
 
 For historical mode-to-mode context, the earlier Radiance 0.9.3/libr4d 0.5.0 matched publication measured:
 

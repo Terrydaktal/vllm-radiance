@@ -152,6 +152,10 @@ def section_opts():
         ("RADIANCE_TOPK_COMPOSITE",   "1", "multi-block small-k sampling mask (KCAP-controlled)"),
         ("RADIANCE_MXFP4",            "0", "native gfx1201 Quark/OCP MXFP4 routing (opt-in)"),
         ("RADIANCE_MXFP4_W4A8",       "0", "packed MXFP4 weights x dynamic FP8 activations via RDNA4 WMMA"),
+        ("RADIANCE_MXFP4_WPERM",      "0", "fragment-order MXFP4 weights for the decode path"),
+        ("RADIANCE_MXFP4_DECODE_NT",  "0", "nontemporal decode weight loads (requires WPERM)"),
+        ("RADIANCE_MXFP4_A_TILED_MIN_M", "0", "fragment-tiled activation prefill threshold (requires FP8 stream)"),
+        ("RADIANCE_GDN_NORM_QUANT",   "0", "fused GDN norm, gate, and per-token FP8 quantization"),
         ("RADIANCE_NORMQUANT_FUSION", "0", "RX4 traced activation-quant profile (MXFP4 W4A8 only)"),
         ("RADIANCE_FP8_STREAM",       "0", "RX4 TP2 AR + residual + RMSNorm + FP8 stream fusion"),
         ("RADIANCE_QUARK_BF16_MTP",   "0", "load a verified BF16 MTP submodule outside the global Quark recipe"),
@@ -160,7 +164,8 @@ def section_opts():
         ("RADIANCE_DYNAMIC_DRAFT",    "1", "per-request MTP draft-depth controller (needs speculative mtp)"),
         ("RADIANCE_FAST_DRAFT",       "0", "INT2 exact-rerank head plus DFlash runtime W4 drafter (opt-in)"),
     ]:
-        badge = ok("ON ") if _val(name, dflt) == "1" else warn("OFF")
+        value = str(_val(name, dflt)).strip().lower()
+        badge = ok("ON ") if value not in ("", "0", "off", "false", "no") else warn("OFF")
         print(f"    {badge} {name:<26} " + dim(desc))
 
     print("\n  " + dim("dynamic drafting (RADIANCE_DYNAMIC_DRAFT):"))
@@ -199,6 +204,18 @@ def section_opts():
         ("RADIANCE_BANNER_PLAIN",   "0", "disable ANSI color (also NO_COLOR)"),
     ]:
         print(f"        {dim('·')} {name} = {c(ACCENT, _val(name, dflt))}  " + dim(desc))
+
+    print("\n  " + dim("calibration / persisted tuning (opt-in):"))
+    fp8_sidecar = os.environ.get("RADIANCE_FP8_KV_SCALES", "")
+    tunable = os.environ.get("RADIANCE_TUNABLEOP_ACTIVE", "off")
+    print(
+        f"        {dim('·')} FP8-KV scales = "
+        + (ok(fp8_sidecar) if fp8_sidecar else dim("checkpoint/default"))
+    )
+    print(
+        f"        {dim('·')} TunableOp = "
+        + (ok(tunable) if tunable != "off" else dim("off"))
+    )
 
     print("\n  " + dim("baked-in (always on; correctness + GEMM path):"))
     baked = [

@@ -65,7 +65,16 @@ def ar_add_rms_quant(y: torch.Tensor, residual: torch.Tensor, weight: torch.Tens
                      eps: float) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     M, K = y.shape
     residual = residual.contiguous()
-    q = torch.empty((M, K), dtype=torch.float8_e4m3fn, device=y.device)
+    import radiance_mxfp4 as _rm
+    # Fragment-tiled output for the prefill GEMM (see radiance_mxfp4.A_TILED_MIN_M). The storage
+    # is padded to 16 rows (the tiling writes whole fragments); the returned q is the [M, K] VIEW
+    # so the op's real and fake shapes agree. The decode fast path below is never tiled (the
+    # threshold is asserted > 512).
+    tiled = _rm.a_tiled_wanted(M)
+    if tiled:
+        q = torch.empty(((M + 15) // 16 * 16, K), dtype=torch.float8_e4m3fn, device=y.device)[:M]
+    else:
+        q = torch.empty((M, K), dtype=torch.float8_e4m3fn, device=y.device)
     sc = torch.empty((M,), dtype=torch.float32, device=y.device)
     ro = torch.empty((M, K), dtype=residual.dtype, device=y.device)
     stream = torch.cuda.current_stream().cuda_stream
@@ -87,7 +96,9 @@ def ar_add_rms_quant(y: torch.Tensor, residual: torch.Tensor, weight: torch.Tens
     y = _ar(y)
     _ext().launch_add_rms_quant(y.data_ptr(), residual.data_ptr(), weight.data_ptr(),
                                 q.data_ptr(), sc.data_ptr(), ro.data_ptr(), M, K, eps,
-                                stream)
+                                stream, 1 if tiled else 0)
+    if tiled:
+        _rm.a_tiled_register(q, M, K)
     return q, sc, ro
 
 
@@ -103,10 +114,17 @@ def _(y, residual, weight, eps):
 def silu_mul_quant(gu: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     M, N2 = gu.shape
     N = N2 // 2
-    q = torch.empty((M, N), dtype=torch.float8_e4m3fn, device=gu.device)
+    import radiance_mxfp4 as _rm
+    tiled = _rm.a_tiled_wanted(M)                     # see ar_add_rms_quant
+    if tiled:
+        q = torch.empty(((M + 15) // 16 * 16, N), dtype=torch.float8_e4m3fn, device=gu.device)[:M]
+    else:
+        q = torch.empty((M, N), dtype=torch.float8_e4m3fn, device=gu.device)
     sc = torch.empty((M,), dtype=torch.float32, device=gu.device)
     _ext().launch_silu_mul_quant(gu.contiguous().data_ptr(), q.data_ptr(), sc.data_ptr(),
-                                 M, N, torch.cuda.current_stream().cuda_stream)
+                                 M, N, torch.cuda.current_stream().cuda_stream, 1 if tiled else 0)
+    if tiled:
+        _rm.a_tiled_register(q, M, N)
     return q, sc
 
 
@@ -124,6 +142,73 @@ class _SiluMulQuant(torch.nn.Module):
 
     def forward(self, gu):
         return torch.ops.radiance.silu_mul_quant(gu)
+
+
+# ---- GDN gated norm + quant (RADIANCE_GDN_NORM_QUANT=1) --------------------------------------
+# RMSNormGated (per-head, norm_before_gate) + the traced per-token quant feeding out_proj, as ONE
+# kernel instead of the two inductor kernels per linear-attention layer (a variance reduction and
+# a normalize+gate+quant; 48 layers = 96 launches/step). Same (q, scale) contract as silu_mul_quant.
+GNQ = os.environ.get("RADIANCE_GDN_NORM_QUANT", "0") == "1"
+
+
+@torch.library.custom_op("radiance::gdn_norm_quant", mutates_args=())
+def gdn_norm_quant(x: torch.Tensor, z: torch.Tensor, w: torch.Tensor,
+                   eps: float) -> tuple[torch.Tensor, torch.Tensor]:
+    M, N = x.shape
+    x = x.contiguous()                                # core_attn_out is allocated contiguous
+    if z.stride(-1) != 1 or z.shape[0] != M or z.shape[1] != N:
+        z = z.contiguous()
+    q = torch.empty((M, N), dtype=torch.float8_e4m3fn, device=x.device)
+    sc = torch.empty((M,), dtype=torch.float32, device=x.device)
+    _ext().launch_gdn_norm_quant(x.data_ptr(), z.data_ptr(), z.stride(0), w.data_ptr(),
+                                 q.data_ptr(), sc.data_ptr(), M, N, float(eps),
+                                 torch.cuda.current_stream().cuda_stream)
+    return q, sc
+
+
+@gdn_norm_quant.register_fake
+def _(x, z, w, eps):
+    M, N = x.shape
+    return (torch.empty((M, N), dtype=torch.float8_e4m3fn, device=x.device),
+            torch.empty((M,), dtype=torch.float32, device=x.device))
+
+
+def _gdn_output_projection(self, core_attn_out, z):
+    """Drop-in for QwenGDN linear attention's _output_projection: norm+gate+quant in one launch,
+    (q, scale) straight into out_proj's pq path."""
+    T = core_attn_out.shape[0]
+    q, sc = torch.ops.radiance.gdn_norm_quant(core_attn_out.reshape(T, -1), z.reshape(T, -1),
+                                              self.norm.weight, float(self.norm.eps))
+    # Call the pre-quantized local GEMM directly so this fusion remains
+    # independent of the broad FP8-stream graph. Then reproduce the applicable
+    # RowParallelLinear epilogue: this Qwen projection receives an already
+    # partitioned input, has no bias, and reduces its TP partials.
+    proj = self.out_proj
+    output = torch.ops.radiance.mxfp4_linear_pq(
+        q, sc, proj.weight, proj.weight_scale, proj.radiance_wref)
+    if proj.reduce_results and proj.tp_size > 1:
+        from vllm.distributed import tensor_model_parallel_all_reduce
+        output = tensor_model_parallel_all_reduce(output)
+    return output
+
+
+def _gnq_ok(la) -> str | None:
+    n = getattr(la, "norm", None)
+    if n is None or getattr(la, "out_proj", None) is None:
+        return "no norm/out_proj"
+    if getattr(n, "group_size", None) is not None or not getattr(n, "norm_before_gate", False):
+        return f"norm shape group_size={getattr(n, 'group_size', None)} before_gate={getattr(n, 'norm_before_gate', None)}"
+    if getattr(n, "activation", "swish") not in ("swish", "silu"):
+        return f"activation {n.activation}"
+    if n.weight.dtype != torch.bfloat16 or n.weight.numel() != 128:
+        return f"norm weight {n.weight.dtype} x{n.weight.numel()}"
+    if not _linear_is_ours(la.out_proj) or la.out_proj.bias is not None:
+        return "out_proj not ours / has bias"
+    if not getattr(la.out_proj, "input_is_parallel", False):
+        return "out_proj input is not already TP-partitioned"
+    if la.out_proj.input_size_per_partition % 128:
+        return f"N {la.out_proj.input_size_per_partition} not a multiple of 128"
+    return None
 
 
 def _stream_forward(self, hidden_states, residual, positions=None, **kwargs):
@@ -180,19 +265,20 @@ def _consumers_ok(layer) -> bool:
 
 
 def install(model) -> None:
-    if not ENABLED:
+    if not ENABLED and not GNQ:
         return
-    try:
-        from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
-        if get_tensor_model_parallel_world_size() <= 1:
-            _log("tp=1, skipping (epilogue exists to absorb the AR)")
+    if ENABLED:
+        try:
+            from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+            if get_tensor_model_parallel_world_size() <= 1:
+                _log("tp=1, skipping FP8 stream (epilogue exists to absorb the AR)")
+                return
+            if get_pp_group().world_size > 1:
+                _log("pp>1, skipping FP8 stream (inter-layer contract crosses pp boundary)")
+                return
+        except Exception as e:                          # noqa: BLE001
+            _log(f"distributed introspection failed, skipping: {e!r}")
             return
-        if get_pp_group().world_size > 1:
-            _log("pp>1, skipping (inter-layer contract crosses pp boundary)")
-            return
-    except Exception as e:                              # noqa: BLE001
-        _log(f"distributed introspection failed, skipping: {e!r}")
-        return
     # The decoder core hides at different depths per wrapper (ForCausalLM: model.model;
     # ForConditionalGeneration: model.language_model.model). Find it structurally: the module
     # that owns BOTH the layer list and the aux-tap config is Qwen3NextModel.
@@ -209,6 +295,25 @@ def install(model) -> None:
         _log("aux hidden state taps are set, skipping")
         return
     import types
+    # GDN norm+quant is useful independently of the much broader FP8 residual
+    # stream. Install only that local output-projection substitution when GNQ
+    # is selected alone; do not replace decoder-layer forwards or alter any
+    # all-reduce contract.
+    if not ENABLED:
+        n_gnq = 0
+        for i, layer in enumerate(layers):
+            if layer.layer_type != "linear_attention":
+                continue
+            why = _gnq_ok(layer.linear_attn)
+            if why is None:
+                layer.linear_attn._output_projection = types.MethodType(
+                    _gdn_output_projection, layer.linear_attn)
+                n_gnq += 1
+            else:
+                _log(f"layer {i}: gdn norm+quant left stock ({why})")
+        _log(f"gdn norm+quant installed on {n_gnq} of {len(layers)} decoder layers")
+        return
+
     n_in = n_mid = n_down = 0
     L = len(layers)
     for i, layer in enumerate(layers):
@@ -253,6 +358,14 @@ def install(model) -> None:
             layer.mlp.act_fn = _SiluMulQuant()
             n_act = getattr(install, "_n_act", 0) + 1
             install._n_act = n_act
+        if GNQ and layer.layer_type == "linear_attention":
+            why = _gnq_ok(layer.linear_attn)
+            if why is None:
+                layer.linear_attn._output_projection = types.MethodType(
+                    _gdn_output_projection, layer.linear_attn)
+                install._n_gnq = getattr(install, "_n_gnq", 0) + 1
+            else:
+                _log(f"layer {i}: gdn norm+quant left stock ({why})")
         layer.forward = types.MethodType(_stream_forward, layer)
         if not hasattr(layer, "_rad_fp8_in"):
             layer._rad_fp8_in = False
@@ -263,4 +376,5 @@ def install(model) -> None:
         if not hasattr(layer, "_rad_fp8_mid"):
             layer._rad_fp8_mid = False
     _log(f"fp8 stream installed: {n_mid} mid epilogues, {n_down} down streams, "
-         f"{getattr(install, '_n_act', 0)} act epilogues over {L} layers")
+         f"{getattr(install, '_n_act', 0)} act epilogues, "
+         f"{getattr(install, '_n_gnq', 0)} gdn norm+quant epilogues over {L} layers")

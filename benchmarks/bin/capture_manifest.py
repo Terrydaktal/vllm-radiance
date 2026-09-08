@@ -66,6 +66,25 @@ def model_record(model: Path) -> dict[str, object]:
     }
 
 
+def file_record(path: Path) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "size_bytes": path.stat().st_size,
+        "sha256": sha256(path),
+    }
+
+
+def directory_artifact_record(root: Path) -> dict[str, object]:
+    return {
+        "path": str(root),
+        "files": [
+            file_record(path)
+            for path in sorted(root.glob("*"))
+            if path.is_file()
+        ],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -78,6 +97,8 @@ def main() -> None:
     parser.add_argument("--image", required=True)
     parser.add_argument("--model-host", type=Path, required=True)
     parser.add_argument("--draft-model-host", type=Path)
+    parser.add_argument("--fp8-kv-scales-host", type=Path)
+    parser.add_argument("--tunableop-root-host", type=Path)
     parser.add_argument("--suite", required=True)
     parser.add_argument("--kv-cache-dtype", required=True)
     parser.add_argument("--max-model-len", type=int, required=True)
@@ -119,6 +140,21 @@ def main() -> None:
         "model": model_record(model),
         "draft_model": (
             model_record(args.draft_model_host) if args.draft_model_host else None
+        ),
+        "fp8_kv_calibration": (
+            {
+                "sidecar": file_record(args.fp8_kv_scales_host),
+                "manifest": file_record(
+                    args.fp8_kv_scales_host.with_suffix(".manifest.json")
+                ),
+            }
+            if args.fp8_kv_scales_host
+            else None
+        ),
+        "tunableop": (
+            directory_artifact_record(args.tunableop_root_host)
+            if args.tunableop_root_host
+            else None
         ),
         "project": {
             "path": str(project),
@@ -173,6 +209,7 @@ def main() -> None:
                 "RADIANCE_GDN_META",
                 "RADIANCE_GDN_MERGE_INPROJ",
                 "RADIANCE_GDN_FUSED_UPDATE",
+                "RADIANCE_GDN_FUSED_MAX_ITEMS",
                 "RADIANCE_GDN_SHARED_BUILD",
                 "RADIANCE_TOPK_TRITON_MIN_ROWS",
                 "RADIANCE_TOPK_COMPOSITE",
@@ -193,6 +230,9 @@ def main() -> None:
                 "RADIANCE_MXFP4_TN4_MIN_M",
                 "RADIANCE_MXFP4_EPIFAST",
                 "RADIANCE_MXFP4_WPERM",
+                "RADIANCE_MXFP4_DECODE_NT",
+                "RADIANCE_MXFP4_A_TILED_MIN_M",
+                "RADIANCE_GDN_NORM_QUANT",
                 "RADIANCE_NORMQUANT_FUSION",
                 "RADIANCE_MXFP4_HOIST_QUANT",
                 "RADIANCE_MXFP4_TRACED_QUANT",
@@ -221,6 +261,17 @@ def main() -> None:
                 "RADIANCE_KV_GROUP_OPT",
                 "RADIANCE_KV_GROUP_SIZE",
                 "RADIANCE_KV_GROUP_MAX_GROUPS",
+                "RADIANCE_FP8_KV_SCALES",
+                "RADIANCE_FP8_KV_SCALES_VERIFY",
+                "RADIANCE_TUNABLEOP_MODE",
+                "RADIANCE_TUNABLEOP_CACHE_DIR",
+                "RADIANCE_TUNABLEOP_NAMESPACE",
+                "RADIANCE_TUNABLEOP_ACTIVE",
+                "PYTORCH_TUNABLEOP_ENABLED",
+                "PYTORCH_TUNABLEOP_TUNING",
+                "PYTORCH_TUNABLEOP_RECORD_UNTUNED",
+                "PYTORCH_TUNABLEOP_FILENAME",
+                "PYTORCH_TUNABLEOP_UNTUNED_FILENAME",
                 "R4D_ATTN_FP8",
                 "RADIANCE_GDN_WMMA",
                 "KV_CACHE_DTYPE",
