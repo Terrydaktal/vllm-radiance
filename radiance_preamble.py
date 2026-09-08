@@ -164,7 +164,8 @@ def section_opts():
         ("RADIANCE_DYNAMIC_DRAFT",    "1", "per-request MTP draft-depth controller (needs speculative mtp)"),
         ("RADIANCE_FAST_DRAFT",       "0", "INT2 exact-rerank head plus DFlash runtime W4 drafter (opt-in)"),
     ]:
-        badge = ok("ON ") if _val(name, dflt) == "1" else warn("OFF")
+        value = str(_val(name, dflt)).strip().lower()
+        badge = ok("ON ") if value not in ("", "0", "off", "false", "no") else warn("OFF")
         print(f"    {badge} {name:<26} " + dim(desc))
 
     print("\n  " + dim("dynamic drafting (RADIANCE_DYNAMIC_DRAFT):"))
