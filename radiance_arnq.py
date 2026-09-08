@@ -179,7 +179,16 @@ def _gdn_output_projection(self, core_attn_out, z):
     T = core_attn_out.shape[0]
     q, sc = torch.ops.radiance.gdn_norm_quant(core_attn_out.reshape(T, -1), z.reshape(T, -1),
                                               self.norm.weight, float(self.norm.eps))
-    output, _ = self.out_proj((q, sc))
+    # Call the pre-quantized local GEMM directly so this fusion remains
+    # independent of the broad FP8-stream graph. Then reproduce the applicable
+    # RowParallelLinear epilogue: this Qwen projection receives an already
+    # partitioned input, has no bias, and reduces its TP partials.
+    proj = self.out_proj
+    output = torch.ops.radiance.mxfp4_linear_pq(
+        q, sc, proj.weight, proj.weight_scale, proj.radiance_wref)
+    if proj.reduce_results and proj.tp_size > 1:
+        from vllm.distributed import tensor_model_parallel_all_reduce
+        output = tensor_model_parallel_all_reduce(output)
     return output
 
 
@@ -195,6 +204,8 @@ def _gnq_ok(la) -> str | None:
         return f"norm weight {n.weight.dtype} x{n.weight.numel()}"
     if not _linear_is_ours(la.out_proj) or la.out_proj.bias is not None:
         return "out_proj not ours / has bias"
+    if not getattr(la.out_proj, "input_is_parallel", False):
+        return "out_proj input is not already TP-partitioned"
     if la.out_proj.input_size_per_partition % 128:
         return f"N {la.out_proj.input_size_per_partition} not a multiple of 128"
     return None
