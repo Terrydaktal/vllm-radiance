@@ -38,6 +38,24 @@ if [ "${RADIANCE_FP8_STREAM:-0}" = "1" ]; then
   fi
 fi
 
+if [ "${RADIANCE_MXFP4_A_TILED_MIN_M:-0}" != "0" ] \
+    && [ "${RADIANCE_FP8_STREAM:-0}" != "1" ]; then
+  echo "[radiance] ERROR A-tiled MXFP4 prefill requires RADIANCE_FP8_STREAM=1; refusing a null experiment" >&2
+  exit 64
+fi
+if [ "${RADIANCE_MXFP4_DECODE_NT:-0}" = "1" ] \
+    && [ "${RADIANCE_MXFP4_WPERM:-0}" != "1" ]; then
+  echo "[radiance] ERROR RADIANCE_MXFP4_DECODE_NT=1 requires fragment-order weights (RADIANCE_MXFP4_WPERM=1)" >&2
+  exit 64
+fi
+if [ "${RADIANCE_GDN_NORM_QUANT:-0}" = "1" ] \
+    && { [ "${RADIANCE_MXFP4:-0}" != "1" ] \
+      || [ "${RADIANCE_MXFP4_W4A8:-0}" != "1" ] \
+      || [ "${RADIANCE_GDN_MERGE_INPROJ:-1}" != "1" ]; }; then
+  echo "[radiance] ERROR RADIANCE_GDN_NORM_QUANT=1 requires native MXFP4 W4A8 and the post-load GDN merge hook" >&2
+  exit 64
+fi
+
 _rad_cache_suffix=""
 if [ "${RADIANCE_GRAPH_CACHE_NAMESPACE:-1}" != "0" ]; then
   # Preserve the already-qualified RX3 default namespace. GDN merge has been
@@ -53,6 +71,7 @@ if [ "${RADIANCE_GRAPH_CACHE_NAMESPACE:-1}" != "0" ]; then
     _rad_cache_suffix="${_rad_cache_suffix}-nqft"
   fi
   [ "${RADIANCE_FP8_STREAM:-0}" = "1" ] && _rad_cache_suffix="${_rad_cache_suffix}-fp8s"
+  [ "${RADIANCE_GDN_NORM_QUANT:-0}" = "1" ] && _rad_cache_suffix="${_rad_cache_suffix}-gnq"
   if [ "${RADIANCE_FAST_DRAFT:-0}" = "1" ] \
       && [ "${RADIANCE_FAST_DRAFT_CACHE_NAMESPACE:-1}" != "0" ]; then
     _rad_cache_suffix="${_rad_cache_suffix}-fast-draft"
@@ -62,6 +81,48 @@ if [ -n "$_rad_cache_suffix" ]; then
   export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/root/.cache/vllm}/radiance${_rad_cache_suffix}"
   export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor}/radiance${_rad_cache_suffix}"
 fi
+
+# ------------------------------------------------------------------ persisted TunableOp
+# PyTorch TunableOp is deliberately OFF unless this Radiance mode is selected.
+# `collect` records encountered GEMM signatures without benchmarking them in
+# live traffic. `serve` consumes a separately tuned, checksum-verified result
+# set with runtime tuning still disabled. The expensive offline tune command is
+# documented separately and must run during a GPU maintenance window.
+_rad_tunable_mode="${RADIANCE_TUNABLEOP_MODE:-off}"
+case "${_rad_tunable_mode,,}" in
+  off|"") ;;
+  collect|serve)
+    _rad_tunable_namespace="${RADIANCE_TUNABLEOP_NAMESPACE:-${RADIANCE_VERSION:-unknown}-gfx1201}"
+    if [[ ! "$_rad_tunable_namespace" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      echo "[radiance] ERROR RADIANCE_TUNABLEOP_NAMESPACE contains unsafe characters" >&2
+      exit 64
+    fi
+    _rad_tunable_root="${RADIANCE_TUNABLEOP_CACHE_DIR:-/cache/tunableop}/${_rad_tunable_namespace}"
+    if [ "${_rad_tunable_mode,,}" = "collect" ]; then
+      mkdir -p "$_rad_tunable_root" || {
+        echo "[radiance] ERROR cannot create TunableOp cache $_rad_tunable_root" >&2
+        exit 73
+      }
+      export PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+    else
+      if ! python -m radiance_tunableop verify --root "$_rad_tunable_root" >/dev/null; then
+        echo "[radiance] ERROR refusing unverified TunableOp results in $_rad_tunable_root" >&2
+        exit 65
+      fi
+      export PYTORCH_TUNABLEOP_RECORD_UNTUNED=0
+    fi
+    export PYTORCH_TUNABLEOP_ENABLED=1
+    export PYTORCH_TUNABLEOP_TUNING=0
+    export PYTORCH_TUNABLEOP_FILENAME="$_rad_tunable_root/results.csv"
+    export PYTORCH_TUNABLEOP_UNTUNED_FILENAME="$_rad_tunable_root/untuned.csv"
+    export RADIANCE_TUNABLEOP_ACTIVE="${_rad_tunable_mode,,}:$_rad_tunable_root"
+    echo "[radiance] TunableOp ${RADIANCE_TUNABLEOP_ACTIVE} (live tuning disabled)" >&2
+    ;;
+  *)
+    echo "[radiance] ERROR RADIANCE_TUNABLEOP_MODE must be off, collect, or serve" >&2
+    exit 64
+    ;;
+esac
 
 # The upstream RX4 launcher couples its traced-quant profile to vLLM's norm/activation fusion
 # pass switches. Merge them into the one compilation-config object (argparse does not merge two
