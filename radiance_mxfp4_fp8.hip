@@ -1165,6 +1165,14 @@ static void launch(uintptr_t a, uintptr_t w, uintptr_t ws, uintptr_t wref, uintp
       dks = split_k_for(dec_nblk, M);
       bkx = 0;   // resolved below from decode_bk64, exactly as shipped
     }
+    // The decode kernel stages complete K slabs without a per-element K bound.
+    // Stock Qwen shapes are divisible by 128, but other valid per-rank shapes
+    // can be divisible by only 64. Select the existing BK=64 instantiation for
+    // those shapes so the final slab cannot read into the following row.
+    if (K % 128) {
+      bkx = 64;
+      if (dks == 2) dks = DEC_KS;
+    }
     // DKS==1 writes C directly and needs neither the partial buffer nor the block counter;
     // anything wider needs both. Sizing the guard by the CHOSEN ks (not the widest) also means a
     // shape that would have overflowed the scratch at DKS=4 can still take the kernel at DKS=1.

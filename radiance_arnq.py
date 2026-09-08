@@ -254,19 +254,20 @@ def _consumers_ok(layer) -> bool:
 
 
 def install(model) -> None:
-    if not ENABLED:
+    if not ENABLED and not GNQ:
         return
-    try:
-        from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
-        if get_tensor_model_parallel_world_size() <= 1:
-            _log("tp=1, skipping (epilogue exists to absorb the AR)")
+    if ENABLED:
+        try:
+            from vllm.distributed import get_pp_group, get_tensor_model_parallel_world_size
+            if get_tensor_model_parallel_world_size() <= 1:
+                _log("tp=1, skipping FP8 stream (epilogue exists to absorb the AR)")
+                return
+            if get_pp_group().world_size > 1:
+                _log("pp>1, skipping FP8 stream (inter-layer contract crosses pp boundary)")
+                return
+        except Exception as e:                          # noqa: BLE001
+            _log(f"distributed introspection failed, skipping: {e!r}")
             return
-        if get_pp_group().world_size > 1:
-            _log("pp>1, skipping (inter-layer contract crosses pp boundary)")
-            return
-    except Exception as e:                              # noqa: BLE001
-        _log(f"distributed introspection failed, skipping: {e!r}")
-        return
     # The decoder core hides at different depths per wrapper (ForCausalLM: model.model;
     # ForConditionalGeneration: model.language_model.model). Find it structurally: the module
     # that owns BOTH the layer list and the aux-tap config is Qwen3NextModel.
@@ -283,6 +284,25 @@ def install(model) -> None:
         _log("aux hidden state taps are set, skipping")
         return
     import types
+    # GDN norm+quant is useful independently of the much broader FP8 residual
+    # stream. Install only that local output-projection substitution when GNQ
+    # is selected alone; do not replace decoder-layer forwards or alter any
+    # all-reduce contract.
+    if not ENABLED:
+        n_gnq = 0
+        for i, layer in enumerate(layers):
+            if layer.layer_type != "linear_attention":
+                continue
+            why = _gnq_ok(layer.linear_attn)
+            if why is None:
+                layer.linear_attn._output_projection = types.MethodType(
+                    _gdn_output_projection, layer.linear_attn)
+                n_gnq += 1
+            else:
+                _log(f"layer {i}: gdn norm+quant left stock ({why})")
+        _log(f"gdn norm+quant installed on {n_gnq} of {len(layers)} decoder layers")
+        return
+
     n_in = n_mid = n_down = 0
     L = len(layers)
     for i, layer in enumerate(layers):

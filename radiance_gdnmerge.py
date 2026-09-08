@@ -209,12 +209,13 @@ def merge_model(model) -> None:
             skipped += 1
             _log(f"merge failed on {getattr(m, 'prefix', '?')}, left unmerged: {e!r}")
     _log(f"merged {n} GDN layers ({2 * n} launches/forward removed), {skipped} left unmerged")
-    # fp8-stream epilogue contract (radiance_arnq, env-gated inside). Runs only down here, after
-    # every GDN module carries its _rad_merged marker: the installer's consumer check reads it.
-    # Consequence: RADIANCE_FP8_STREAM needs RADIANCE_GDN_MERGE_INPROJ=1, which is the default.
-    if os.environ.get("RADIANCE_FP8_STREAM", "0") == "1":
+    # Install either the complete FP8-stream contract or the independent GDN
+    # norm+quant output-projection fusion. This runs after weight processing so
+    # the installer's W4A8 guards can prove the downstream projection is ours.
+    if (os.environ.get("RADIANCE_FP8_STREAM", "0") == "1"
+            or os.environ.get("RADIANCE_GDN_NORM_QUANT", "0") == "1"):
         try:
             import radiance_arnq
             radiance_arnq.install(model)
         except Exception as e:                          # noqa: BLE001
-            _log(f"fp8-stream install failed, serving without it: {e!r}")
+            _log(f"post-load fusion install failed, serving without it: {e!r}")

@@ -38,6 +38,24 @@ if [ "${RADIANCE_FP8_STREAM:-0}" = "1" ]; then
   fi
 fi
 
+if [ "${RADIANCE_MXFP4_A_TILED_MIN_M:-0}" != "0" ] \
+    && [ "${RADIANCE_FP8_STREAM:-0}" != "1" ]; then
+  echo "[radiance] ERROR A-tiled MXFP4 prefill requires RADIANCE_FP8_STREAM=1; refusing a null experiment" >&2
+  exit 64
+fi
+if [ "${RADIANCE_MXFP4_DECODE_NT:-0}" = "1" ] \
+    && [ "${RADIANCE_MXFP4_WPERM:-0}" != "1" ]; then
+  echo "[radiance] ERROR RADIANCE_MXFP4_DECODE_NT=1 requires fragment-order weights (RADIANCE_MXFP4_WPERM=1)" >&2
+  exit 64
+fi
+if [ "${RADIANCE_GDN_NORM_QUANT:-0}" = "1" ] \
+    && { [ "${RADIANCE_MXFP4:-0}" != "1" ] \
+      || [ "${RADIANCE_MXFP4_W4A8:-0}" != "1" ] \
+      || [ "${RADIANCE_GDN_MERGE_INPROJ:-1}" != "1" ]; }; then
+  echo "[radiance] ERROR RADIANCE_GDN_NORM_QUANT=1 requires native MXFP4 W4A8 and the post-load GDN merge hook" >&2
+  exit 64
+fi
+
 _rad_cache_suffix=""
 if [ "${RADIANCE_GRAPH_CACHE_NAMESPACE:-1}" != "0" ]; then
   # Preserve the already-qualified RX3 default namespace. GDN merge has been
@@ -53,6 +71,7 @@ if [ "${RADIANCE_GRAPH_CACHE_NAMESPACE:-1}" != "0" ]; then
     _rad_cache_suffix="${_rad_cache_suffix}-nqft"
   fi
   [ "${RADIANCE_FP8_STREAM:-0}" = "1" ] && _rad_cache_suffix="${_rad_cache_suffix}-fp8s"
+  [ "${RADIANCE_GDN_NORM_QUANT:-0}" = "1" ] && _rad_cache_suffix="${_rad_cache_suffix}-gnq"
   if [ "${RADIANCE_FAST_DRAFT:-0}" = "1" ] \
       && [ "${RADIANCE_FAST_DRAFT_CACHE_NAMESPACE:-1}" != "0" ]; then
     _rad_cache_suffix="${_rad_cache_suffix}-fast-draft"
