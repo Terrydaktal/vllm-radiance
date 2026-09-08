@@ -220,7 +220,10 @@ these in the immutable manifest:
 | Control | Image default | Purpose |
 |---|---:|---|
 | `RADIANCE_MXFP4_EPIFAST` | `1` | Branch-free full-tile output epilogue |
-| `RADIANCE_MXFP4_WPERM` | `0` | Decode-priority fragment-order weights; trades some prefill speed |
+| `RADIANCE_MXFP4_WPERM` | `0` | Fragment-order weights; qualified with `DECODE_NT=1` for Quark MXFP4 |
+| `RADIANCE_MXFP4_DECODE_NT` | `0` | Non-temporal decode loads; enable only with WPERM |
+| `RADIANCE_MXFP4_A_TILED_MIN_M` | `0` | Experimental tiled-activation prefill threshold; zero disables it |
+| `RADIANCE_GDN_NORM_QUANT` | `0` | Experimental independent GDN norm/gate/FP8-quant fusion |
 | `RADIANCE_MXFP4_DECODE_MAX_M` | `64` | Extend to `128` only for a qualified 16-sequence profile |
 | `RADIANCE_GDN_MERGE_INPROJ` | `1` | Merge each GDN layer's two input projections at load time |
 | `RADIANCE_GDN_FUSED_UPDATE` | `1` | Select libr4d's fused speculative GDN update |
@@ -268,6 +271,14 @@ depths. It also diverged on all eight strict greedy prompts and passed only
 27/30 sampled multi-tool requests. Keep both switches off outside a labeled
 experiment; the complete report and immutable run IDs are in
 `docs/MXFP4_RX4_CONTINUATION.md`.
+
+The subsequent RX5 isolation qualified only WPERM plus decode-NT: it passed
+the sampled tool gate 100/100 and improved matched quick decode by
+3.6–6.7% at c1/c2/c4/c8. Full RX5 plus DFlash passed only 93/100, so A-tiled,
+GDN norm-quant, traced quant, and FP8 stream remain experimental. Use the
+exact configurations, failures, and publication results in
+`docs/MXFP4_RX5_FP8KV_CONTINUATION.md` rather than treating the aggregate RX5
+label as a deployable profile.
 
 For an explicit cache-lineage diagnostic, the benchmark Compose accepts
 `CONTAINER_VLLM_CACHE_ROOT` and `CONTAINER_TORCHINDUCTOR_CACHE_DIR`. These names

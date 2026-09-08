@@ -187,7 +187,7 @@ runs show a real improvement and all correctness gates pass. Because the
 qualified MXFP4 path already bypasses BLAS for most large projections, the
 expected gain is modest and could be zero.
 
-## Preflight and GPU qualification status
+## Qualification status
 
 CPU-only validation covers parsability, sidecar restrictions, exact
 checkpoint binding, tamper rejection, TunableOp result completeness, and
@@ -198,6 +198,14 @@ python benchmarks/bin/check_fp8_kv_calibration.py
 python benchmarks/bin/check_tunableop.py
 ```
 
-GPU calibration, sidecar load/scale inspection, full gates, TunableOp
-collection/tuning, and performance comparisons are intentionally deferred
-until a declared maintenance window.
+GPU calibration completed on the exact AMD Quark MXFP4 checkpoint with TP2,
+R4D attention, seed 17, and the checked-in eight-prompt corpus. The immutable
+artifact contains 64 scalar tensors covering Q/K/V/prob scales for all 16
+full-attention layers; its checksum and exact source-model binding passed
+verification. This proves the capture and artifact pipeline, not a quality
+gain. Runtime sidecar promotion still requires held-out quality, long-context,
+vision, DFlash-acceptance, and matched BetterBench qualification.
+
+Persisted TunableOp collection and offline tuning remain unpromoted. The
+preflight, namespace, completeness, and tamper checks pass, but no performance
+claim is made until a populated cache wins a repeated matched benchmark.
