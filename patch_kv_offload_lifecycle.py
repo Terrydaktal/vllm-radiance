@@ -8,6 +8,11 @@ shared-memory lifetime: the kernel reclaims the pages when the last mapping
 closes, including after SIGKILL, so restarts cannot accumulate 24+ GiB orphan
 files in /dev/shm.
 
+After the lifecycle anchors are installed this script invokes the independent
+rank-sharded layout overlay. That ordering is deliberate: the experimental
+layout extends the lifecycle-patched constructor while remaining inert unless
+``RADIANCE_KV_OFFLOAD_RANK_SHARDED=1``.
+
 Idempotent; exact-anchor guarded; ast.parse checked before writing.
 """
 
@@ -15,6 +20,7 @@ import sysconfig
 from pathlib import Path
 
 from _patchlib import apply
+from patch_kv_offload_rank_sharded import main as patch_rank_sharded_layout
 
 
 LIB = Path(sysconfig.get_paths()["purelib"])
@@ -226,3 +232,4 @@ class CPUOffloadingSpec(OffloadingSpec):
 
 patch_shared_region()
 patch_cpu_spec()
+patch_rank_sharded_layout()
