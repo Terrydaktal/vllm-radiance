@@ -91,11 +91,18 @@ def check_block_addressing() -> None:
     assert layout.ranges[1].offset == 32
 
     backing = bytearray(64)
-    for rank_range in layout.ranges:
+    rank_views = [
+        memoryview(backing)[rank_range.offset : rank_range.end]
+        for rank_range in layout.ranges
+    ]
+    for rank_range, rank_view in zip(layout.ranges, rank_views):
         for block in range(layout.num_blocks):
-            offset = rank_range.block_offset(block)
-            backing[offset] = 10 * rank_range.rank + block + 1
+            rank_view[block * rank_range.row_stride] = (
+                10 * rank_range.rank + block + 1
+            )
 
+    assert [rank_views[0][b * layout.worker_row_stride] for b in range(4)] == [1, 2, 3, 4]
+    assert [rank_views[1][b * layout.worker_row_stride] for b in range(4)] == [11, 12, 13, 14]
     assert [backing[layout.ranges[0].block_offset(b)] for b in range(4)] == [1, 2, 3, 4]
     assert [backing[layout.ranges[1].block_offset(b)] for b in range(4)] == [11, 12, 13, 14]
     assert [layout.ranges[0].block_offset(b) for b in range(4)] == [0, 8, 16, 24]
