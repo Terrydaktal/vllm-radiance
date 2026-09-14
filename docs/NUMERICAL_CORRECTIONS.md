@@ -16,9 +16,11 @@ local Philox index by `1 << 30`, adapting the independent draft stream in
 
 This affects probabilistic drafting. It does not change model positions, cache
 indices, greedy selection or the proposal probabilities passed to verification.
-The selector's sampling-position buffer is already unclamped. Its direct
-`gumbel_noised_argmax` call needs this adaptation separately from upstream's
-generic drafting sampler.
+Upstream #54282 already fixes this same DFlash2 selector by passing
+`IS_DRAFTING=True` to its updated `gumbel_noised_argmax` API. Radiance's pinned
+vLLM v0.28.0 predates that API, so this backport adds the same salt directly to
+the selector's local RNG index. It is not an additional correction to upstream
+vLLM main. The selector's sampling-position buffer is already unclamped.
 
 With target probabilities `[0.1, 0.5, 0.4]`, draft probabilities `[0.5, 0.3, 0.2]`
 and 200,000 draws at each of three positions, the largest absolute probability
