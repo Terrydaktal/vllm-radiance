@@ -18,18 +18,22 @@ import pytest
 SOURCE = Path(os.environ.get("RADIANCE_TEST_SOURCE_ROOT", str(Path(__file__).resolve().parents[1])))
 
 
-def gate(rerank=80, candidates=8):
+def gate(rerank=80, candidates=8, global_topk=0):
     module = ast.parse((SOURCE / "radiance_verifyhead.py").read_text())
     functions = [
         node
         for node in module.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_batch_is_safe"
+        if isinstance(node, ast.FunctionDef) and node.name in (
+            "_batch_is_safe", "_sampled_top_k_limit", "_global_processors_supported",
+        )
     ]
-    assert len(functions) == 1
+    assert any(node.name == "_batch_is_safe" for node in functions)
     namespace = {
         "_dh": SimpleNamespace(RERANK=rerank, KCAND=candidates),
         "_NO_LOGPROBS": -1,
         "MAX_ROWS": 32,
+        "GLOBAL_TOPK": global_topk,
+        "_GLOBAL_MAX_ROWS": 32,
     }
     exec(compile(ast.Module(body=functions, type_ignores=[]), "actual-gate", "exec"), namespace)
     return namespace["_batch_is_safe"]
@@ -96,6 +100,7 @@ def test_native_clustered_top20_falls_back_to_full_logits(monkeypatch):
 
     monkeypatch.setenv("RADIANCE_DRAFT_RERANK", "80")
     monkeypatch.setenv("RADIANCE_FAST_DRAFT", "1")
+    monkeypatch.setenv("RADIANCE_VERIFY_HEAD_GLOBAL_TOPK", "0")  # Explicit legacy path.
     draft = load_module("radiance_drafthead")
     verify = load_module("radiance_verifyhead")
     assert draft.KCAND == 8
