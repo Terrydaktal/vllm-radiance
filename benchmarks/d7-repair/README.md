@@ -116,7 +116,7 @@ compiled M1/M8; Fix 1 compiled/eager M8; final compiled/eager M8. GDN/attention
 adapters preserve private cache state between substitutions. The original fused
 Q/K-normalization/rotation boundary is treated as a composite, and attention
 decode/merge share one correctness boundary despite separate GPU timings.
-The updated combined support/repair CPU suite passes **412 tests**, with one
+The updated combined support/repair CPU suite passes **428 tests**, with one
 retained-compiler-artifact check skipped.
 
 The code intentionally rejects source or geometry drift. Porting these adapters
