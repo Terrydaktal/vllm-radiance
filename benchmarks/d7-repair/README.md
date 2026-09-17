@@ -1,7 +1,7 @@
-# Pinned D7 numerical repair and compiled replay
+# Pinned D7 arithmetic and eager/compiled rounding repairs
 
 These are the source-bound workers, kernels and adapters used for the completed
-[compiled 10K M1/M8 experiment](https://github.com/Terrydaktal/qwen-r9700-lab/releases/tag/d7-report-v1.0.0).
+[compiled M1/M8 and eager/compiled experiments](https://github.com/Terrydaktal/d7-rdna4-report/blob/main/reports/d7-rdna4-2026-09-17/REPORT.md).
 This is an experimental qualification path. It does not change the container's
 default inference configuration or automatically accept a different source build.
 
@@ -13,6 +13,12 @@ d7-repair/
 ├── probe_*                    # small native correctness/state/graph/performance gates
 ├── optimized_d7_*             # admitted optimized paths and pre-capture installation
 ├── benchmark_*                # forced-token replay and separate unprofiled speed controls
+├── execution_mode_d7_worker.py # controlled eager/compiled replay using the same repairs
+├── rotary_mode_d7_worker.py   # pinned native RoPE nearest-even product intervention
+├── isolated_d7_capture.py     # actual native boundaries, checked against release outputs
+├── native_d7_*                # native call tape and isolated historical/stateful stage adapters
+├── analyze_native_d7_stages.py # complete-layer and release-output evidence audit
+├── compare_*                 # CPU-only admission and comparison of retained evidence
 ├── trace_private_d7_rows.py   # owner-only aligned logit capture
 ├── tests/                    # CPU adapter, admission and replay regressions
 ├── configs/profiles/          # pinned finite-precision reference contract
@@ -52,10 +58,45 @@ Native execution order:
    produces separate private aligned rows and public aggregate comparisons.
    `benchmark_optimized_d7.py` measures speed separately without correctness tracing.
 
-The complete report contains top-1/10/20 set and ordering results, every compiled
-GPU stage/group with old/fixed timing and its repair, and source/binary seals.
-All-seven-accepted replay passed 10,000/10,000 positions and 23/23 prefills.
-Eager-versus-compiled M1 remains a separately measured unresolved discrepancy.
+There are two major repairs:
+
+1. **M1/M8 arithmetic alignment.** The optimized compiled pair matched all
+   10,000 decode positions and 23 initial-prefill predictions, including full
+   vocabulary vectors and top-1/10/20 membership, ordering and scores.
+2. **Eager/compiled rounding alignment.** Preserve intermediate casts with
+   `TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1` before starting a compiled worker.
+   For the pinned eager control, `benchmark_rotary_contract_d7.py` installs the
+   source-checked BF16 nearest-even RoPE product correction before model load.
+   The pair matched all 320 decode vectors and the prefill prediction. This
+   smaller result is separate from Fix 1's 10K qualification.
+
+The RoPE intervention addresses the installed compiler's BF16 multiply lowering;
+the corresponding [Triton repair is already merged](https://github.com/triton-lang/triton/pull/11227).
+Use the pinned intervention only with its admitted source identity. A newer
+compiler requires fresh qualification, not another copy of the workaround.
+
+`compare_execution_modes_d7.py` checks source/configuration identities before
+comparing retained rows. `compare_rotary_intervention_d7.py` admits the explicit
+rounding change. Boundary capture is an untimed diagnostic; it must reproduce
+the graph-enabled release outputs, and its timings are never release timings.
+The public report supplies the stage timings, evidence and qualification scope.
+
+`benchmark_native_catalog_d7.py` records the actual generated callable identities
+and argument layouts. `benchmark_native_tape_d7.py` captures the current compiled
+calls and private state, checks its full output against the ordinary forward,
+then substitutes one stage/layer at a time. `analyze_native_d7_stages.py` requires
+complete layer and position coverage, state restoration, negative controls and
+an exact bridge to the graph-enabled release before exporting aggregate counts.
+Equal local outputs/state may reuse the validated reference result; unequal
+ones run through the actual remaining model and full vocabulary head.
+
+The isolated matrix has four comparisons: original compiled M1/M8; Fix 1
+compiled M1/M8; Fix 1 compiled/eager M8; final compiled/eager M8. GDN/attention
+adapters preserve private cache state between substitutions. The original fused
+Q/K-normalization/rotation boundary is treated as a composite, and attention
+decode/merge share one correctness boundary despite separate GPU timings.
+The updated combined support/repair CPU suite passes **412 tests**, with one
+retained-compiler-artifact check skipped.
 
 The code intentionally rejects source or geometry drift. Porting these adapters
 to newer dependencies needs fresh qualification; the published result is tied

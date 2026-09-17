@@ -24,7 +24,8 @@ from qwen_r9700_lab.diagnostic_contract import (
 )
 
 
-def make_config(spec, lane, *, speculation=True):
+def make_config(spec, lane, *, speculation=True, isolated_capture=False, execution_mode="compiled"):
+    require(execution_mode in ("compiled", "compiled-no-graphs", "eager"), "invalid execution mode")
     config = dict(spec["native_config"])
     for key in ("kv_transfer_config", "scheduler_cls", "additional_config", "async_scheduling"):
         config.pop(key, None)
@@ -38,7 +39,31 @@ def make_config(spec, lane, *, speculation=True):
         config.pop("speculative_config", None)
         # Keep the same ordered scheduler used by this DFlash release.
         config["async_scheduling"] = False
+    if isolated_capture:
+        config["compilation_config"] = {"cudagraph_mode": "NONE"}
+        config["worker_cls"] = "isolated_d7_capture.IsolatedCaptureWorker"
+    if execution_mode != "compiled":
+        config["enforce_eager"] = execution_mode == "eager"
+        config["compilation_config"] = {"cudagraph_mode": "NONE"}
+        if execution_mode == "eager":
+            config["compilation_config"]["mode"] = 0
+        config["worker_cls"] = (
+            "execution_mode_d7_worker.ExecutionModeCaptureWorker"
+            if isolated_capture
+            else "execution_mode_d7_worker.ExecutionModeWorker"
+        )
     return config
+
+
+def validate_execution_metadata(metadata, *, execution_mode, isolated_capture):
+    eager = execution_mode == "eager"
+    require(metadata["enforce_eager"] == eager, "actual eager setting differs from requested mode")
+    require((metadata["compilation_mode"] == 0) == eager, "actual compilation mode differs")
+    expected_graph = "NONE" if isolated_capture or execution_mode != "compiled" else "PIECEWISE"
+    require(
+        str(metadata["graph_mode"]).split(".")[-1] == expected_graph,
+        "actual graph mode differs from requested mode",
+    )
 
 
 def worker(args):
@@ -53,17 +78,21 @@ def worker(args):
     package = Path(importlib.util.find_spec("vllm").origin).parent.parent
     verify_sources(package, spec["binding"])
     root = args.output / args.lane
-    config = make_config(spec, args.lane, speculation=not args.m1)
+    config = make_config(
+        spec,
+        args.lane,
+        speculation=not args.m1,
+        isolated_capture=args.isolated_capture,
+        execution_mode=args.execution_mode,
+    )
     write_private(root / "requested-config.json", seal(config))
     llm = LLM(**config)
     engine = llm.llm_engine
     with reject_dead_native_rpcs(engine.engine_core):
         metadata = llm.collective_rpc("qwen_optimized_metadata")[0]
-    require(
-        not metadata["enforce_eager"] and metadata["compilation_mode"] != 0,
-        "actual configuration is not compiled",
+    validate_execution_metadata(
+        metadata, execution_mode=args.execution_mode, isolated_capture=args.isolated_capture
     )
-    require("PIECEWISE" in metadata["graph_mode"], "piecewise graphs were not enabled")
     write_private(root / "actual-runtime.json", seal(metadata))
     passes = []
     modes = ["correctness"] if args.correctness else ["warmup"] + ["clean"] * args.repeats
@@ -180,6 +209,7 @@ def worker(args):
                     {
                         "lane": args.lane,
                         "mode": mode,
+                        "execution_mode": args.execution_mode,
                         "index": index,
                         "fixture": fixture["sha256"],
                         "output_tokens": received,
@@ -224,6 +254,7 @@ def worker(args):
     summary = {
         "status": "MEASURED" if clean else "REPLAYED",
         "lane": args.lane,
+        "execution_mode": args.execution_mode,
         "fixture": fixture["sha256"],
         "metadata": metadata,
         "passes": [p["sha256"] for p in passes],
@@ -272,6 +303,8 @@ def run(args):
                 "max_output_tokens": args.tokens,
                 "correctness": args.correctness,
                 "m1": args.m1,
+                "isolated_capture": args.isolated_capture,
+                "execution_mode": args.execution_mode,
                 "performance_manifest": str(args.performance_manifest)
                 if args.performance_manifest
                 else None,
@@ -298,9 +331,17 @@ def run(args):
                 if args.performance_manifest:
                     env["QWEN_OPTIMIZED_PERFORMANCE"] = str(args.performance_manifest)
             argv = [sys.executable, str(Path(__file__).resolve()), "worker", "--lane", lane]
-            for key in ("spec", "fixture", "private", "output", "tokens", "repeats"):
-                argv += ["--" + key, str(getattr(args, key))]
-            for flag in ("profile", "correctness", "with_correctness", "m1"):
+            for key in (
+                "spec",
+                "fixture",
+                "private",
+                "output",
+                "tokens",
+                "repeats",
+                "execution_mode",
+            ):
+                argv += ["--" + key.replace("_", "-"), str(getattr(args, key))]
+            for flag in ("profile", "correctness", "with_correctness", "m1", "isolated_capture"):
                 if getattr(args, flag):
                     argv += ["--" + flag.replace("_", "-")]
             with OwnedProcess(
@@ -327,7 +368,20 @@ def main():
     )
     parser.add_argument("--tokens", type=int, default=1024)
     parser.add_argument("--repeats", type=int, default=3)
-    for key in ("profile", "correctness", "with-correctness", "m1", "allow-gpu"):
+    parser.add_argument(
+        "--execution-mode",
+        choices=("compiled", "compiled-no-graphs", "eager"),
+        default="compiled",
+        help="Replay correctness with the same repair bindings; non-default modes are untimed.",
+    )
+    for key in (
+        "profile",
+        "correctness",
+        "with-correctness",
+        "m1",
+        "allow-gpu",
+        "isolated-capture",
+    ):
         parser.add_argument("--" + key, action="store_true")
     args = parser.parse_args()
     require(
@@ -335,6 +389,14 @@ def main():
         and args.repeats >= 0
         and (args.repeats > 0 or args.profile or args.correctness),
         "invalid timing budget",
+    )
+    require(
+        not args.isolated_capture or (args.correctness and not args.profile),
+        "isolated capture is an untimed correctness diagnostic, not a release-speed measurement",
+    )
+    require(
+        args.execution_mode == "compiled" or (args.correctness and not args.profile),
+        "execution-mode comparison requires an untimed forced correctness replay",
     )
     os.umask(0o077)
     (run if args.command == "run" else worker)(args)

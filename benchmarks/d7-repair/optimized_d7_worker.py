@@ -7,6 +7,7 @@ The separate correctness probe forces identical tokens and retains private rows.
 
 import contextlib
 import functools
+import hashlib
 import os
 from collections import Counter
 from pathlib import Path
@@ -205,6 +206,23 @@ class OptimizedWorker(Worker):
             "graph_mode": str(c.cudagraph_mode),
             "capture_sizes": c.cudagraph_capture_sizes,
             "async_scheduling": self.scheduler_config.async_scheduling,
+            "effective_capacity": {
+                "max_num_seqs": self.scheduler_config.max_num_seqs,
+                "max_num_batched_tokens": self.scheduler_config.max_num_batched_tokens,
+                "max_model_len": self.model_config.max_model_len,
+                "block_size": self.vllm_config.cache_config.block_size,
+                "cache_dtype": self.vllm_config.cache_config.cache_dtype,
+                "num_gpu_blocks": self.vllm_config.cache_config.num_gpu_blocks,
+            },
+            "diagnostic_sources": {
+                name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+                for name in (
+                    "optimized_d7_worker.py",
+                    "optimized_stock_norm.py",
+                    "execution_mode_d7_worker.py",
+                    "isolated_d7_capture.py",
+                )
+            },
             "repair": self._qwen_persistent_repairs.receipt()
             if self._qwen_persistent_repairs
             else None,
