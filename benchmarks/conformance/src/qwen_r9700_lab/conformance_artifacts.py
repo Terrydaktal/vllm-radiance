@@ -37,6 +37,7 @@ FLAGS = (
     "RADIANCE_PREFILL_FP8",
     "GPU_MAX_HW_QUEUES",
     "HSA_ENABLE_MWAITX",
+    "TORCHINDUCTOR_EMULATE_PRECISION_CASTS",
 )
 
 
@@ -63,6 +64,14 @@ def mapped_libraries(text):
             if ".so" in Path(path).name or path.endswith((".hsaco", ".co")):
                 paths.add(path)
     return sorted(paths)
+
+
+def compiler_settings(modules=None):
+    """Observe an already-loaded compiler; never import/initialize Torch here."""
+    modules = sys.modules if modules is None else modules
+    config = modules.get("torch._inductor.config")
+    value = getattr(config, "emulate_precision_casts", None) if config is not None else None
+    return {"emulate_precision_casts": value if type(value) is bool else None}
 
 
 def capture_runtime(*, maps_path=Path("/proc/self/maps"), environ=None):
@@ -93,6 +102,7 @@ def capture_runtime(*, maps_path=Path("/proc/self/maps"), environ=None):
             "machine": platform.machine(),
             "packages": versions,
             "flags": {name: env.get(name) for name in FLAGS},
+            "compiler_settings": compiler_settings(),
             "mapped_file_bytes": libraries,
             "unavailable_files": unavailable,
             "unproved": {
