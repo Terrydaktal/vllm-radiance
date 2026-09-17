@@ -90,6 +90,11 @@ an exact bridge to the graph-enabled release before exporting aggregate counts.
 Equal local outputs/state may reuse the validated reference result; unequal
 ones run through the actual remaining model and full vocabulary head.
 
+Set `QWEN_D7_TAPE_GROUPS=40` for the 320-position isolated sweep. The default
+captures one eight-position pilot group; `--tokens 320` controls the forced
+continuation length, not the number of instrumented groups. The aggregate audit
+rejects a run unless all 40 groups and 320 positions are present.
+
 The isolated matrix has four comparisons: original compiled M1/M8; Fix 1
 compiled M1/M8; Fix 1 compiled/eager M8; final compiled/eager M8. GDN/attention
 adapters preserve private cache state between substitutions. The original fused
