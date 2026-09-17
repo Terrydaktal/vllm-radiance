@@ -2,7 +2,9 @@
   "files": {
     "analyze_gdn_decode_transition.py": "421eebf3094d5b1bf0301c942eb4ae0f37a2a3d9be5431c03ed1c2491b12f9f8",
     "analyze_native_d7_stages.py": "8a382f9b96c8dcc813509d4c9af32e95c95abf00b3902ce0d0d9bf52f947f74b",
+    "audit_crossmode_d7_corpus.py": "2fe4527e2d795292b4cc72de5569b5a519077841ed926801899d086c4eaa6734",
     "benchmark_compiled_d7_corpus.py": "7211fb3edfacff0a5e1a2f0cbaac324b6eb0a5a08f96c5ecada0a039d2231ef8",
+    "benchmark_crossmode_d7_corpus.py": "4917b3a9b8974849c81f8dbe6adab3be2ae74c5c63f4c1abe965f9db9bdf2ad8",
     "benchmark_d7_equivalence.py": "a0c686cf96776f301bf8ee7af5fe7215a5f7a0dab20a165ee102e2e3b5702e1c",
     "benchmark_native_catalog_d7.py": "81698bdfdfd20538f1bed13bda3b86cf9ace39192a13466b9b2c7f73d31ffb5e",
     "benchmark_native_tape_d7.py": "d132220f7567d60e98bb6e90f25c46fa7dab80ae61d623d704b4f67e109fea41",
@@ -66,6 +68,7 @@
     "stock_m1_head_pair.py": "c9c28c7ba213c2059524968fb11616abc3f4a5e7117029125f4bd14e95a963e9",
     "stock_m1_norm.py": "75c25493b585dea55ce76984dc21e526e24d2038c81984539304ae8144f4c29a",
     "stock_target_arithmetic.py": "65dcc0c1301e3c684002761315916d85a1f978d93d055577e5b4e2a863dc9cf1",
+    "tests/test_crossmode_d7_corpus.py": "1440caea6f6175750fef6f06a7a73253098e0afd1e686a7b203fbfde2bfaab1e",
     "tests/test_d7_rotary_intervention.py": "860c274864471717152cdcd23b56dd69cd7887d6df3b1bad4588a2ee0e88dfdf",
     "tests/test_execution_mode_capture.py": "e3fe186971c2921462dbea7c922fab9ab5a058b5dcd317f9204e8732801046b0",
     "tests/test_isolated_d7_final_norm.py": "37d34dc2d358a1a1063296b0ae9b75063482ecb5ef057bd2261b66de430a90da",

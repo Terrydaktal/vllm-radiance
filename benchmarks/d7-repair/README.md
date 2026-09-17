@@ -57,6 +57,15 @@ Native execution order:
    manifests, checkpoints each continuation, audits actual compiled graph use and
    produces separate private aligned rows and public aggregate comparisons.
    `benchmark_optimized_d7.py` measures speed separately without correctness tracing.
+6. `benchmark_crossmode_d7_corpus.py run --revision before|final` measures eager M1
+   versus compiled M8 on that same sealed corpus. Run both revisions with distinct
+   output/private directories. The final eager reference includes the RoPE repair;
+   final compiled M8 preserves BF16 intermediates. Each continuation is checkpointed.
+   `audit_crossmode_d7_corpus.py` authenticates all four runs, checks execution modes,
+   repair identities, graph replays and aligned positions, then recomputes the public
+   before/after counts. Raw tokens and ranked IDs stay in private tmpfs. The
+   benchmark retains the shared GPU lease and explicit `--allow-gpu` requirement;
+   the auditor runs on the CPU.
 
 There are two major repairs:
 
@@ -69,6 +78,13 @@ There are two major repairs:
    source-checked BF16 nearest-even RoPE product correction before model load.
    The pair matched all 320 decode vectors and the prefill prediction. This
    smaller result is separate from Fix 1's 10K qualification.
+
+The combined repair also matches **eager M1 versus compiled M8** at all **10,000
+decode positions and 23 initial-prefill predictions**, including top-1/10/20
+sets, ranking, retained scores, boundary ties and full-vocabulary hashes. The
+report compares original and final pairs with fresh eager references on the same
+23-continuation Pi corpus. This is a forced, all-seven-accepted replay on the
+pinned backend, not an arbitrary-input or independent mathematical proof.
 
 The RoPE intervention addresses the installed compiler's BF16 multiply lowering;
 the corresponding [Triton repair is already merged](https://github.com/triton-lang/triton/pull/11227).
