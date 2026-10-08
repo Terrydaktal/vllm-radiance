@@ -2,7 +2,8 @@
 """Exercise the installed DFlash selector/rejection kernels with fixed probabilities.
 
 The control subtracts the proposal salt to reproduce the old shared-noise bug.
-No checkpoint or conversation is needed. Run after patch_dflash_sampling_rng.py.
+No checkpoint or conversation is needed. Current vLLM 0.30 supplies the
+proposal salt upstream; no local sampling overlay is required.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ def run(output: Path, samples: int):
         sample_pos = torch.full((n,), position + 1, device=device, dtype=torch.int64)
         positions = torch.tensor([position, position + 1], device=device, dtype=torch.int64).repeat(n)
         native = gumbel_sample(logits[:n], state, temperature, seeds,
-                               sample_pos - 1, apply_temperature=True)
+                               sample_pos - 1, is_drafting=False, apply_temperature=True)
         native_observed = torch.bincount(native.long(), minlength=3).float() / n
         native_rows.append({"position": position, "observed": native_observed.tolist(),
                             "max_error": float((native_observed - target).abs().max())})

@@ -89,3 +89,13 @@ translation units were built with its compiler and the libr4d build's
 `-O3 -std=c++17 -fPIC --offload-arch=gfx1201 -mcumode` flags. This qualifies the
 changed unit, not a full rebuild of every image variant. Compact numeric evidence
 is in [qualification.json](../benchmarks/results/20260914-numerical-corrections/qualification.json).
+
+## Current-main integration (2026-10-08)
+
+The original measurements above describe the vLLM 0.28 backport. Current
+Radiance pins vLLM 0.30, whose DFlash selector passes `IS_DRAFTING=True`
+to the upstream salted Gumbel helper. The obsolete local sampling patch
+and its Docker invocation were removed during integration; the upstream
+regression remains available through `test dflash --dry-run`. The GDN
+repair still applies to the unchanged pinned libr4d source. Historical
+qualification receipts are preserved; current-run evidence is separate.
