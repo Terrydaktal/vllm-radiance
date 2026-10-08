@@ -63,3 +63,9 @@ Those helpers are not standalone Radiance entry points. The supported boundary
 is the documented conformance comparison/replay tooling and synthetic tests;
 provide explicit source-bound inputs for native work. No origin-project
 configuration discovery or serving-default integration is claimed.
+
+AI deploy integration validation (2026-10-08): the support suite passes 198
+CPU tests on the published vLLM 0.30 image. The declared locked uv CPU
+environment passes the combined support/repair suite: 428 passed, one
+retained-compiler-artifact skip. No native current-stack qualification is
+claimed for the source-bound vLLM 0.28 replay adapters.
