@@ -246,3 +246,23 @@ def test_native_public_hook_switches_global_and_full_head(monkeypatch):
     for result in (fast, resumed):
         assert torch.equal(result.masked_fill(result < cutoff, -float("inf")), expected)
     assert draft.KCAND == 8 and draft.RERANK == 80
+
+
+@pytest.mark.parametrize("fast_draft", [False, True])
+def test_public_hook_respects_fast_draft_opt_in(fast_draft):
+    module = ast.parse((SOURCE / "radiance_verifyhead.py").read_text())
+    hook = next(node for node in module.body
+                if isinstance(node, ast.FunctionDef) and node.name == "before_compute_logits")
+    calls = []
+    state = {"armed": False, "failed": False}
+
+    def arm(model):
+        calls.append(model)
+        state["failed"] = True
+
+    namespace = {"ENABLED": True, "_dh": SimpleNamespace(FAST=fast_draft),
+                 "_state": state, "_arm": arm}
+    exec(compile(ast.Module(body=[hook], type_ignores=[]), "actual-hook", "exec"), namespace)
+    model = object()
+    namespace["before_compute_logits"](SimpleNamespace(model=model), None, None)
+    assert calls == ([model] if fast_draft else [])

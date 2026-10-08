@@ -246,7 +246,7 @@ def _batch_is_safe(runner, input_batch, grammar_output) -> bool:
 
 def before_compute_logits(runner, input_batch, grammar_output) -> None:
     """Called from model_runner.sample() immediately before compute_logits."""
-    if not ENABLED or _dh is None or _state["failed"]:
+    if not ENABLED or _dh is None or not _dh.FAST or _state["failed"]:
         return
     if not _state["armed"]:
         _arm(runner.model)

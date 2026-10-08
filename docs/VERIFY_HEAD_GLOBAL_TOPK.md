@@ -33,7 +33,7 @@ RADIANCE_VERIFY_HEAD_GLOBAL_TOPK=256
 `RADIANCE_VERIFY_HEAD_GLOBAL_TOPK` defaults to `256` in Python and Compose.
 Set `128` for a smaller global shortlist or `0` to restore the legacy block
 shortlist with its capacity gate. The target optimization still requires
-`RADIANCE_VERIFY_HEAD=1` and `RADIANCE_FAST_DRAFT=1`.
+`RADIANCE_VERIFY_HEAD=1` and `RADIANCE_FAST_DRAFT=1`. The public hook now enforces both flags before packing or rebinding the target head; older code documented this condition without checking the fast-draft flag.
 Global selection requires TP1, BF16 inputs and
 weights, a supported layout and no more than 32 target rows per invocation.
 Sampled requests need `0 < top_k <= GLOBAL_TOPK // 4`. This retains an empirical
