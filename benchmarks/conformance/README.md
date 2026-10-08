@@ -49,3 +49,17 @@ layers, changed fixtures, unchecked reference output and failed state recovery.
 The combined support/repair CPU suite passes **412 tests**, with one retained
 compiler-artifact check skipped. Native qualification is reported separately in
 the [public report](https://github.com/Terrydaktal/d7-rdna4-report/blob/main/reports/d7-rdna4-2026-09-17/REPORT.md).
+
+## Radiance test registry and package boundary
+
+`python tools/radiance.py test conformance` selects the CPU support suite.
+The dedicated uv environment is separate from the pinned serving image; it
+does not upgrade production PyTorch or other runtime dependencies.
+
+This import preserves the original source closure and its hashes. The legacy
+`config.py` / `manifests.py` configuration-authoring helpers require the origin
+project's schemas and full configuration tree, which are not included here.
+Those helpers are not standalone Radiance entry points. The supported boundary
+is the documented conformance comparison/replay tooling and synthetic tests;
+provide explicit source-bound inputs for native work. No origin-project
+configuration discovery or serving-default integration is claimed.

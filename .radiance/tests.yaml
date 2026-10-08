@@ -13,6 +13,9 @@ qualification_levels:
 - performance-qualified
 - release-qualified
 change_map:
+- pattern: ^benchmarks/conformance/
+  areas:
+  - conformance
 - pattern: '^(\.radiance/|tools/|AGENTS\.md$|CONTRIBUTING\.md$|docs/maintenance/)'
   areas: [control-plane]
 - pattern: '^(Dockerfile|Dockerfile\.dev|Dockerfile\.patch|\.gitlab-ci\.yml|Makefile)$'
@@ -222,3 +225,13 @@ tests:
   automatic: false
   ci: false
   description: Long-context cache-placement pressure matrix with source counters and response equality.
+- id: conformance-support-cpu
+  class: contract
+  hardware: cpu
+  areas:
+  - conformance
+  command: uv run --project benchmarks/conformance --locked --group dev pytest benchmarks/conformance/tests
+    -q
+  automatic: true
+  ci: false
+  description: Synthetic numerical/state contracts; no model loading or GPU qualification.
