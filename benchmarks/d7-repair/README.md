@@ -124,3 +124,21 @@ to newer dependencies needs fresh qualification; the published result is tied
 to the pinned Radiance 1.0.16 / vLLM 0.28 environment. This PR provides the complete
 experimental integration for review, while small core changes are submitted to
 vLLM and libr4d separately.
+
+## Radiance integration and qualification boundary
+
+This branch includes the companion #10 history so the bundle is executable;
+merge #10 first, then #11 through their original pull requests. Run
+`python tools/radiance.py test d7-repair --dry-run` for the registry command.
+The uv CPU-test environment is isolated from the serving stack.
+
+The native adapters deliberately remain bound to their published vLLM 0.28
+source identities. Current Radiance uses vLLM 0.30; rejection of that source
+drift is expected, not permission to replace hash constants. Porting native
+adapters and rerunning the pinned model campaign is separate work. Importing
+this experimental bundle does not install a production arithmetic override.
+
+Current integration validation (2026-10-08): the locked uv CPU environment
+passes the combined support/repair suite: 428 passed, one retained-compiler
+artifact check skipped. The published Radiance 1.0.387 image produces the
+same count. This validates CPU contracts, not current-stack native replay.
