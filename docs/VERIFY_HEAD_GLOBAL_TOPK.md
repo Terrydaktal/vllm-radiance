@@ -177,3 +177,13 @@ public hook's global → full → global transition. Tied zero-score candidates
 outside the final top-20 may occupy different shortlist slots; tests compare the
 specified top-20 sampling support and scores rather than requiring an arbitrary
 tie ordering from `torch.topk`.
+
+## Current-main integration
+
+Global-256 remains the contributor's default **inside the explicitly enabled
+approximate verify-head experiment**, not a lossless correctness guarantee.
+This integration does not promote it to a qualified production default.
+Historical throughput evidence is tied to the original vLLM 0.28 stack;
+current native regressions and TP2 fallback checks must be recorded separately.
+Run `python tools/radiance.py test verify-head --dry-run` for the CPU/native plan.
+CPU tests require pytest and NumPy in the selected Python environment.
